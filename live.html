@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Feather-Talk 라이브</title>
+  <meta name="theme-color" content="#86d7ff">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="assets/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="live">
+  <div class="controls" id="controls">
+    <a href="index.html" class="back" title="편집기로 돌아가기"><i data-icon="arrow-left" data-size="15"></i> 편집</a>
+    <label><span>마이크 민감도</span><input class="reverse" type="range" min="0" max="100" id="thres"></label>
+    <label><span>리깅 강도</span><input type="range" min="0" max="200" id="rig"></label>
+    <label title="마우스를 멈추면 캐릭터가 알아서 둘러봐요. 왼쪽은 정면 근처에서만, 오른쪽은 크게 왔다갔다해요."><span>자동 모션 범위</span><input type="range" min="10" max="100" id="range"></label>
+    <label title="30으로 낮추면 컴퓨터 사용량이 절반 가까이 줄어요. 대신 움직임이 조금 덜 부드러워요."><span>프레임</span>
+      <select id="fps"><option value="60">60fps</option><option value="30">30fps (가볍게)</option></select>
+    </label>
+    <span class="cam">
+      <button type="button" class="cam-toggle" id="cam-toggle" title="웹캠으로 얼굴 각도만 따라가요. 영상은 화면에 띄우거나 어디로 보내지 않아요."><i data-icon="camera" data-size="15"></i> 웹캠 </button>
+      <span id="cam-extra" hidden style="display:contents">
+        <span class="cam-status" id="cam-status" role="status"></span>
+        <button type="button" class="cam-toggle" id="cam-calibrate" title="정면을 보고 눈을 뜬 채로 눌러 주세요. 지금 자세를 정면으로, 지금 눈 뜬 정도를 평소 뜬 눈으로 잡아요." hidden><i data-icon="crosshair" data-size="15"></i> 정면 맞추기 </button>
+        <label title="켜면 거울처럼, 내가 왼쪽을 보면 캐릭터도 화면 왼쪽을 봐요"><input type="checkbox" id="cam-mirror"> 좌우 반전</label>
+        <label title="눈을 확실히 감고 있으면 캐릭터도 감아요 (약간 늦게 반응해요). 얼굴을 놓치면 자동 깜빡임으로 돌아가요."><input type="checkbox" id="cam-eyes"> 눈 깜빡임도</label>
+      </span>
+    </span>
+    <label><span>배경색</span><input type="color" id="color"></label>
+    <span class="hint">숫자키 1~0: 표정 전환 · <span id="mic-icon" class="mic" title="조용함"><i data-icon="mic" data-size="14"></i></span></span>
+    <span class="mic-error" id="mic-error" role="status" hidden></span>
+  </div>
+  <canvas class="stage" id="stage" aria-label="캐릭터"></canvas>
+  <div class="nogl" id="nogl" hidden>이 브라우저는 WebGL을 지원하지 않아요.</div>
+  <script type="module" src="js/live.js"></script>
+</body>
+</html>

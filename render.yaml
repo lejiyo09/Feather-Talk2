@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: feather-talk2
+    runtime: static
+    buildCommand: ""
+    staticPublishPath: .
+    headers:
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache
+    routes:
+      # 원본과 같은 /live 주소도 쓸 수 있게
+      - type: rewrite
+        source: /live
+        destination: /live.html

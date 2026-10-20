@@ -1,0 +1,16 @@
+{
+  "name": "Feather-Talk",
+  "short_name": "Feather-Talk",
+  "description": "레이어 PNG로 캐릭터를 움직이는 브라우저 아바타 도구 (비공식 재구현)",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef2f5",
+  "theme_color": "#86d7ff",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/icon.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
