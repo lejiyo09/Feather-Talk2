@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>FeatherTalk</title>
+  <meta name="description" content="FeatherTalk v2 웹앱 재구현 (PWA)">
+  <meta name="theme-color" content="#1f2937">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 원본 화면 분석 전 임시 셸. 원본 UI 분석 후 이 영역을 교체한다. -->
+  <main id="app" class="shell">
+    <h1>FeatherTalk</h1>
+    <p>원본 사이트 분석 대기 중인 PWA 기본 골격입니다.</p>
+    <p class="status">
+      연결 상태: <span id="net-status">확인 중…</span><br>
+      서비스 워커: <span id="sw-status">확인 중…</span>
+    </p>
+    <button id="install-btn" type="button" hidden>앱 설치</button>
+  </main>
+  <script src="script.js" defer></script>
+</body>
+</html>

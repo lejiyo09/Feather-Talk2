@@ -1,0 +1,19 @@
+/* 임시 스타일 — 원본 분석 후 디자인 토큰으로 교체 예정 */
+:root {
+  --bg: #ffffff;
+  --fg: #111827;
+  --muted: #6b7280;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #111827; --fg: #f9fafb; --muted: #9ca3af; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.shell { max-width: 640px; margin: 0 auto; padding: 32px 16px; }
+.status { color: var(--muted); font-size: 14px; line-height: 1.6; }
