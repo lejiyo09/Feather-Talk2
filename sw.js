@@ -1,12 +1,16 @@
 'use strict';
 
 // 앱 셸 캐시. 파일이 바뀌면 버전을 올려 이전 캐시를 정리한다.
-const CACHE_VERSION = 'ft-shell-v1';
+const CACHE_VERSION = 'ft-shell-v2';
 const APP_SHELL = [
   './',
   'index.html',
   'style.css',
   'script.js',
+  'js/store.js',
+  'js/renderer.js',
+  'js/motion.js',
+  'js/default-character.js',
   'manifest.webmanifest',
   'assets/icons/icon-192.png',
   'assets/icons/icon-512.png'
@@ -32,24 +36,20 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
 
-  // 페이지 이동: 네트워크 우선, 실패 시 캐시된 셸
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).catch(() => caches.match('index.html'))
-    );
-    return;
-  }
-
-  // 정적 리소스: 캐시 우선, 없으면 네트워크 후 캐시에 저장
+  // 네트워크 우선: 온라인이면 항상 최신 배포본, 오프라인이면 캐시
   event.respondWith(
-    caches.match(req).then((cached) =>
-      cached || fetch(req).then((res) => {
+    fetch(req)
+      .then((res) => {
         if (res.ok) {
           const copy = res.clone();
           caches.open(CACHE_VERSION).then((cache) => cache.put(req, copy));
         }
         return res;
       })
-    )
+      .catch(() =>
+        caches.match(req).then((cached) =>
+          cached || (req.mode === 'navigate' ? caches.match('index.html') : Response.error())
+        )
+      )
   );
 });
