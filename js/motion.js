@@ -77,15 +77,16 @@ class HairSim {
   }
 }
 
-// 흔들림 물리를 켠 머리 레이어마다 시뮬레이션 하나
+// 흔들림 물리를 켠 레이어마다 시뮬레이션 하나
 export class HairSystem {
   sims = new Map();
   out = new Map();
 
-  update(dt, layers, head, t, breathLag = 0) {
+  // allowBody: 베타에서는 몸 레이어(치마·꼬리 등)도 흔든다
+  update(dt, layers, head, t, breathLag = 0, allowBody = false) {
     const live = new Set();
     for (const l of layers) {
-      if (!l.hair.enabled || l.part !== 'head') continue;
+      if (!l.hair.enabled || (l.part !== 'head' && !allowBody)) continue;
       live.add(l.id);
       let sim = this.sims.get(l.id);
       if (!sim) {
@@ -102,6 +103,38 @@ export class HairSystem {
       }
     }
     return this.out;
+  }
+}
+
+// 몸 리깅: 팔이 어깨에 매달려 기울기 반대로 흔들리고, 살짝 살랑인다
+export class ArmSway {
+  upper = { x: 0, v: 0 };
+  fore = { x: 0, v: 0 };
+  acc = 0;
+  update(dt, tilt, t) {
+    for (this.acc += Math.min(dt, 0.1); this.acc >= STEP; this.acc -= STEP) {
+      spring(this.upper, -tilt * 1.3, 40, 0.44 * Math.sqrt(40), STEP);
+      spring(this.fore, -this.upper.x * 0.5, 25, 2.2, STEP);
+    }
+    const idle = Math.sin(t * 1.6) * 0.02;
+    return { upperL: this.upper.x - idle, foreL: this.fore.x, upperR: this.upper.x + idle, foreR: this.fore.x };
+  }
+}
+
+// 연주 포즈: 연주 중이면 동작 1·2를 오가고, 끝나면 기본 자세로 부드럽게 돌아온다
+export class PosePlayer {
+  w = 0;
+  update(dt, playing, poses, speed, t) {
+    const d = Math.min(dt, 0.1);
+    this.w = playing ? Math.min(1, this.w + d / 0.15) : Math.max(0, this.w - d / 0.3);
+    if (this.w === 0) return { pose: [], poseLen: [] };
+    const k = 0.5 - 0.5 * Math.cos(2 * Math.PI * speed * t);
+    const w = this.w * this.w * (3 - 2 * this.w);
+    const lerp = (a, b) => a + (b - a) * k;
+    return {
+      pose: poses.a.map((a, i) => w * lerp(a, poses.b[i] || 0)),
+      poseLen: poses.a.map((_, i) => 1 + w * (lerp(poses.aLen?.[i] ?? 1, poses.bLen?.[i] ?? 1) - 1))
+    };
   }
 }
 

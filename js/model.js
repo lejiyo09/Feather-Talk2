@@ -3,6 +3,29 @@
 import { DEFAULT_PRESET } from './default-preset.js';
 
 export const MODEL_KEY = 'ftModel';
+export const BETA_MODEL_KEY = 'ftModelBeta';
+let modelKey = MODEL_KEY;
+// 베타·멀티는 정식판과 설정을 따로 저장한다
+export function useBetaStorage(beta) {
+  modelKey = beta ? BETA_MODEL_KEY : MODEL_KEY;
+}
+
+function lsGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function lsSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (err) {
+    console.error('설정을 저장하지 못했어요', err);
+    return false;
+  }
+}
 
 // 깜빡임 값이 이 이상이면 '감은 눈'으로 본다
 export const BLINK_CLOSED = 0.9;
@@ -132,34 +155,111 @@ export function normalizeModel(raw) {
   return m;
 }
 
-export function loadModel() {
-  let raw = null;
-  try {
-    raw = localStorage.getItem(MODEL_KEY);
-  } catch {
-    // 저장소를 못 쓰는 환경 (사생활 보호 모드 등)
+// 버전 1(feathertalk.live)이 쓰던 부위별 저장값 → 레이어 모델
+const LEGACY_KEYS = [
+  ['ftBang', 'bang', '/assets/bang.png'],
+  ['ftMouth', 'mouth', '/assets/mouth.png'],
+  ['ftMouthOpen', 'mouthOpen', '/assets/mouthopen.png'],
+  ['ftEyes', 'eyes', '/assets/eyes.png'],
+  ['ftEyesClosed', 'eyesClosed', '/assets/eyesclosed.png'],
+  ['ftFace', 'face', '/assets/face.png'],
+  ['ftBody', 'body', '/assets/body.png'],
+  ['ftBack', 'back', '/assets/back.png']
+];
+function legacyModel() {
+  if (!LEGACY_KEYS.some(([k]) => lsGet(k))) return null;
+  const m = emptyModel();
+  for (const [key, kind, def] of LEGACY_KEYS) {
+    // 값은 주소 하나이거나, 표정 10개 각각의 주소 배열
+    let urls = Array(10).fill(def);
+    const raw = lsGet(key);
+    if (raw) {
+      try {
+        urls = raw[0] === '[' ? JSON.parse(raw) : Array(10).fill(raw);
+      } catch {
+        // 깨진 값은 기본 그림
+      }
+    }
+    urls = urls.map(normalizeAssetPath);
+    const distinct = [...new Set(urls)];
+    distinct.forEach((url, i) => {
+      const layer = makeLayer(kind, url);
+      if (distinct.length > 1) layer.name += ` ${i + 1}`;
+      layer.expressions = urls.map((u) => u === url);
+      m.layers.push(layer);
+    });
   }
+  return m;
+}
+
+export function loadModel() {
+  const raw = lsGet(modelKey) || (modelKey === BETA_MODEL_KEY ? lsGet(MODEL_KEY) : null);
+  let m = null;
   if (raw) {
     try {
-      const m = normalizeModel(JSON.parse(raw));
+      m = normalizeModel(JSON.parse(raw));
       if (m.layers.length) return m;
+      m = defaultCharacter();
     } catch (err) {
       console.error('ftModel을 읽지 못했어요', err);
     }
   }
-  const m = defaultCharacter();
+  m = m || legacyModel() || defaultCharacter();
   saveModel(m);
   return m;
 }
 
 export function saveModel(m) {
+  return lsSet(modelKey, JSON.stringify(m));
+}
+
+// ───────── 베타: 1~0번 캐릭터 슬롯 ─────────
+const SLOTS_KEY = 'ftSlotsBeta';
+const ACTIVE_SLOT_KEY = 'ftSlotBeta';
+
+// 기존 모델에서 n번 표정에 보이는 레이어만 뽑아 캐릭터 하나로
+function slotFromExpression(model, n) {
+  const m = JSON.parse(JSON.stringify(model));
+  const picked = m.layers.filter((l) => l.expressions[n]);
+  m.layers = (picked.length ? picked : m.layers).map((l) => ({ ...l, expressions: Array(10).fill(true) }));
+  return m;
+}
+
+export function loadSlots() {
+  const active = Math.min(9, Math.max(0, parseInt(lsGet(ACTIVE_SLOT_KEY) || '0', 10) || 0));
   try {
-    localStorage.setItem(MODEL_KEY, JSON.stringify(m));
-    return true;
+    const saved = JSON.parse(lsGet(SLOTS_KEY) || 'null');
+    if (Array.isArray(saved) && saved.length) {
+      const slots = saved.map(normalizeModel);
+      while (slots.length < 10) slots.push(normalizeModel(JSON.parse(JSON.stringify(slots[0]))));
+      return { slots: slots.slice(0, 10), active };
+    }
   } catch (err) {
-    console.error('설정을 저장하지 못했어요', err);
-    return false;
+    console.error('캐릭터 슬롯을 읽지 못했어요', err);
   }
+  const base = loadModel();
+  return { slots: Array.from({ length: 10 }, (_, n) => slotFromExpression(base, n)), active };
+}
+
+export function saveSlots(slots, active) {
+  const ok = lsSet(SLOTS_KEY, JSON.stringify(slots));
+  lsSet(ACTIVE_SLOT_KEY, String(active));
+  return ok;
+}
+
+// 다른 탭(멀티 설정 등)에서 슬롯을 바꾸면 알려 준다
+export function watchSlots(cb) {
+  const onStorage = (e) => {
+    if (e.key !== SLOTS_KEY || !e.newValue) return;
+    try {
+      const v = JSON.parse(e.newValue);
+      if (Array.isArray(v) && v.length) cb(v.map(normalizeModel));
+    } catch {
+      // 깨진 값은 무시
+    }
+  };
+  window.addEventListener('storage', onStorage);
+  return () => window.removeEventListener('storage', onStorage);
 }
 
 // 지금 상태에서 이 레이어가 보이는지
@@ -207,8 +307,30 @@ export const getFile = (id) => withStore('readonly', (s) => s.get(id));
 const deleteFile = (id) => withStore('readwrite', (s) => s.delete(id));
 
 // 어느 레이어도 쓰지 않는 업로드 파일을 지운다
+// 정식판·베타 모델, 캐릭터 슬롯, 멀티 오브젝트가 쓰는 파일은 남긴다
 export async function cleanupFiles(model) {
-  const used = new Set(model.layers.filter((l) => l.src?.type === 'file').map((l) => l.src.value));
+  const models = [model];
+  for (const key of [MODEL_KEY, BETA_MODEL_KEY]) {
+    if (key === modelKey) continue;
+    try {
+      const v = lsGet(key);
+      if (v) models.push(JSON.parse(v));
+    } catch {
+      // 무시
+    }
+  }
+  try {
+    models.push(...(JSON.parse(lsGet(SLOTS_KEY) || '[]') || []));
+  } catch {
+    // 무시
+  }
+  try {
+    const multi = JSON.parse(lsGet('ftMulti') || 'null');
+    if (multi) models.push({ layers: (multi.objects || []).map((o) => o.file).filter(Boolean).map((f) => ({ src: { type: 'file', value: f } })) });
+  } catch {
+    // 무시
+  }
+  const used = new Set(models.flatMap((m) => (m.layers || []).filter((l) => l.src?.type === 'file').map((l) => l.src.value)));
   const keys = await withStore('readonly', (s) => s.getAllKeys());
   await Promise.all(keys.map(String).filter((k) => !used.has(k)).map(deleteFile));
 }

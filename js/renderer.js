@@ -1,11 +1,13 @@
 // WebGL 렌더러. 레이어마다 64×64 격자를 정점 셰이더에서 변형한다.
 // 좌표는 그림 가로 = 1 단위 (세로는 0 ~ aspect).
 import { BLINK_CLOSED, isLayerShown } from './model.js';
+import { BONE, assignBone, vertexBones, computeBones } from './rig.js';
 
 const GRID = 64;
 
 const VERT = `
 attribute vec2 aPos;
+attribute float aBone;    // 몸 리깅: 따라갈 뼈 번호 (양팔·양다리 레이어는 점마다 다름)
 uniform vec2 uRes;
 uniform vec3 uRect;       // 그림이 놓인 화면 위치 x, y, 가로 길이 (px)
 uniform float uAspect;
@@ -13,7 +15,14 @@ uniform vec3 uCenter;     // 얼굴 중심 x, y, 반지름
 uniform vec3 uHead;       // yaw, pitch, roll (라디안)
 uniform vec2 uSquash;
 uniform vec2 uBreath;     // 몸 늘어남, 머리 오르내림
-uniform float uSeg;       // 0 머리, 1 몸
+uniform float uSeg;       // 0 머리, 1 몸, 2 고정
+uniform float uRig;       // 몸 리깅을 켰으면 1
+uniform vec2 uWaist;
+uniform float uBodyR;
+uniform vec3 uBodyAng;    // 상체 yaw, 상체 pitch, 하체 yaw
+uniform vec4 uBoneM[12];
+uniform vec2 uBoneT[12];
+uniform float uBoneZ[12];
 uniform float uDepth;
 uniform float uCurve;
 uniform float uHairOn;
@@ -32,6 +41,12 @@ vec2 rotate2(vec2 v, float a) {
   return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
 }
 
+vec2 boneMove(float i, vec2 p) {
+  int k = int(i + 0.5);
+  vec4 M = uBoneM[k];
+  return vec2(M.x * p.x + M.z * p.y, M.y * p.x + M.w * p.y) + uBoneT[k];
+}
+
 void main() {
   vUv = aPos;
   float A = uAspect;
@@ -43,9 +58,7 @@ void main() {
     float inside = 1.0 - smoothstep(uEyeBand.y, uEyeBand.y * 1.5, abs(m.y - uEyeBand.x));
     m.y = pivot + (m.y - pivot) * mix(1.0, uEyeBand.z, inside);
   }
-  // 깜빡일 때 통통: 눈 높이를 축으로 세로 배율
   if (uPop != 1.0) m.y = uEyeBand.x + (m.y - uEyeBand.x) * uPop;
-  // 입 벌림: 벌린 입 그림의 가운데를 축으로 크기 변화
   if (uMouth.w != 1.0) m = uMouth.xy + (m - uMouth.xy) * uMouth.zw;
 
   // 머리카락/장식: 고정선에서 멀수록 크게 휘고 밀린다
@@ -58,7 +71,9 @@ void main() {
     m = a + rotate2(m - a, uHairAngle * w) + uHairOffset * w;
   }
 
-  if (uSeg < 0.5) {
+  if (uSeg > 1.5) {
+    // 고정: 그대로
+  } else if (uSeg < 0.5) {
     // 머리: 얼굴 중심의 구면 위에 있다고 보고 회전 (깊이 + 볼록/오목)
     vec2 p = m - uCenter.xy;
     float r2 = clamp(dot(p, p) / (uCenter.z * uCenter.z), 0.0, 1.0);
@@ -66,17 +81,34 @@ void main() {
     p.x = p.x * cos(uHead.x) + z * sin(uHead.x);
     p.y = p.y * cos(uHead.y) + z * sin(uHead.y);
     m = uCenter.xy + p;
-    m.y += uBreath.y;
-  } else {
-    // 몸: 발끝 기준으로 숨쉬며 늘어난다
-    m.y = A + (m.y - A) * (1.0 + uBreath.x);
+  } else if (uRig > 0.5) {
+    // 몸 리깅: 허리를 지나는 세로 원기둥 위에 있다고 보고 상체·하체 비율로 돈다
+    float upper = aBone > ${BONE.spine - 0.5} ? 1.0 : 0.0;
+    float dx = m.x - uWaist.x;
+    float r2 = clamp(dx * dx / (uBodyR * uBodyR), 0.0, 1.0);
+    float z = uDepth + uCurve * (1.0 - r2);
+    float yaw = mix(uBodyAng.z, uBodyAng.x, upper);
+    m.x = uWaist.x + dx * cos(yaw) + z * sin(yaw);
+    float dy = m.y - uWaist.y;
+    m.y = uWaist.y + dy * cos(uBodyAng.y * upper) + z * sin(uBodyAng.y * upper);
   }
-  // 캐릭터 전체: 아래 가운데를 축으로 기울기 + 늘어남/납작해짐
-  vec2 feet = vec2(0.5, A);
-  m = feet + rotate2((m - feet) * uSquash, uHead.z);
+
+  if (uSeg > 1.5) {
+    // 고정
+  } else if (uRig > 0.5) {
+    // 기울기·호흡·팔 흔들림은 뼈 변환에 들어 있다
+    if (uSeg < 0.5) m = boneMove(${BONE.head}.0, m);
+    else m = boneMove(aBone, m);
+  } else {
+    if (uSeg < 0.5) m.y += uBreath.y;
+    else m.y = A + (m.y - A) * (1.0 + uBreath.x);
+    vec2 feet = vec2(0.5, A);
+    m = feet + rotate2((m - feet) * uSquash, uHead.z);
+  }
 
   vec2 px = uRect.xy + m * uRect.z;
-  gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
+  float z = uRig > 0.5 && uSeg > 0.5 && uSeg < 1.5 ? -uBoneZ[int(aBone + 0.5)] : 0.0;
+  gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, z, 1.0);
 }`;
 
 const FRAG = `
@@ -91,9 +123,9 @@ void main() {
   gl_FragColor = c * uAlpha;
 }`;
 
-const UNIFORMS = ['uRes', 'uRect', 'uAspect', 'uCenter', 'uHead', 'uSquash', 'uBreath', 'uSeg', 'uDepth', 'uCurve',
-  'uHairOn', 'uAnchorY', 'uHairDir', 'uHairEnd', 'uHairOffset', 'uHairAngle', 'uTex', 'uAlpha', 'uAlphaTest',
-  'uEyeBand', 'uPop', 'uMouth'];
+const UNIFORMS = ['uRes', 'uRect', 'uAspect', 'uCenter', 'uHead', 'uSquash', 'uBreath', 'uSeg', 'uRig', 'uWaist', 'uBodyR',
+  'uBodyAng', 'uBoneM', 'uBoneT', 'uBoneZ', 'uDepth', 'uCurve', 'uHairOn', 'uAnchorY', 'uHairDir', 'uHairEnd', 'uHairOffset',
+  'uHairAngle', 'uTex', 'uAlpha', 'uAlphaTest', 'uEyeBand', 'uPop', 'uMouth'];
 
 function compile(gl, type, src) {
   const s = gl.createShader(type);
@@ -103,7 +135,7 @@ function compile(gl, type, src) {
   return s;
 }
 
-// 그림의 불투명한 영역(입 가운데 찾기 등)
+// 그림의 불투명한 영역: 가운데·위·아래, 뼈 고르기에 쓸 표본 점
 let probe = null;
 function analyze(img) {
   probe ||= (() => {
@@ -115,6 +147,7 @@ function analyze(img) {
   probe.drawImage(img, 0, 0, 128, 128);
   const d = probe.getImageData(0, 0, 128, 128).data;
   let x0 = 128, y0 = 128, x1 = -1, y1 = -1;
+  const points = [];
   for (let y = 0; y < 128; y++) {
     for (let x = 0; x < 128; x++) {
       if (d[(y * 128 + x) * 4 + 3] > 40) {
@@ -122,16 +155,18 @@ function analyze(img) {
         if (x > x1) x1 = x;
         if (y < y0) y0 = y;
         y1 = y;
+        if (x % 4 === 0 && y % 4 === 0) points.push([(x + 0.5) / 128, (y + 0.5) / 128]);
       }
     }
   }
-  if (x1 < 0) return { mid: [0.5, 0.5], top: 0, bottom: 1 };
-  return { mid: [(x0 + x1 + 1) / 2 / 128, (y0 + y1 + 1) / 2 / 128], top: y0 / 128, bottom: (y1 + 1) / 128 };
+  if (x1 < 0) return { mid: [0.5, 0.5], top: 0, bottom: 1, points };
+  return { mid: [(x0 + x1 + 1) / 2 / 128, (y0 + y1 + 1) / 2 / 128], top: y0 / 128, bottom: (y1 + 1) / 128, points };
 }
 
-// opts.layout: 'center'(편집기, 여백 8%) | 'bottom'(라이브, 아래에 붙임)
+// opts.layout: 'center'(편집기, 여백 8%) | 'bottom'(라이브, 아래에 붙임) | 'fill'(멀티, 꽉 채움)
+// opts.maxTexture: 텍스처 최대 크기 (베타 4096)
 export function createRenderer(canvas, opts = {}) {
-  const gl = canvas.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: true, stencil: true });
+  const gl = canvas.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: true, stencil: true, depth: true });
   if (!gl) return null;
   const prog = gl.createProgram();
   gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VERT));
@@ -153,7 +188,8 @@ export function createRenderer(canvas, opts = {}) {
       idx.push(a, a + 1, b, a + 1, b + 1, b);
     }
   }
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  const posBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
@@ -163,15 +199,20 @@ export function createRenderer(canvas, opts = {}) {
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
   gl.uniform1i(u.uTex, 0);
+  const boneAttr = gl.getAttribLocation(prog, 'aBone');
 
-  const textures = new Map(); // 레이어 키 → { tex, ready, mid, top, bottom }
+  const textures = new Map(); // 레이어 키 → { tex, ready, mid, top, bottom, points, bone }
   let layers = [];
   let aspect = 1;
+  let rigBody = null; // 리깅을 켠 몸 설정 (뼈 고르기에 씀)
+  let headR = 0.25;
+  let view = { zoom: 1, x: 0, y: 0 };
 
   const keyOf = (l) => `${l.id}|${l.src.type}:${l.src.value}`;
 
   function maxTexture() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (opts.maxTexture) return Math.min(opts.maxTexture, gl.getParameter(gl.MAX_TEXTURE_SIZE));
     return Math.min(2048, gl.getParameter(gl.MAX_TEXTURE_SIZE), Math.ceil(Math.min(screen.width, screen.height) * dpr));
   }
 
@@ -191,7 +232,7 @@ export function createRenderer(canvas, opts = {}) {
   function load(layer, resolve) {
     const key = keyOf(layer);
     if (textures.has(key)) return;
-    const entry = { key, tex: null, ready: false, mid: [0.5, 0.5], top: 0, bottom: 1 };
+    const entry = { key, tex: null, ready: false, mid: [0.5, 0.5], top: 0, bottom: 1, points: [], bone: { key: '', id: 0, skin: null } };
     textures.set(key, entry);
     if (!layer.src.value) return;
     resolve(layer).then((url) => {
@@ -231,16 +272,53 @@ export function createRenderer(canvas, opts = {}) {
     });
   }
 
-  // 그림이 화면에 놓이는 위치 (캔버스 픽셀)
+  // 몸 레이어가 따라갈 뼈 (관절·몸통·비율이 바뀌면 다시 고른다)
+  function boneFor(entry) {
+    if (!rigBody) return BONE.spine;
+    const key = JSON.stringify([rigBody.joints, rigBody.radius, aspect, headR]);
+    if (entry.bone.key !== key) {
+      const id = assignBone(entry.points.map(([x, y]) => ({ x, y: y * aspect })), rigBody, aspect, headR);
+      let skin = entry.bone.skin;
+      if (id < 0) {
+        skin ||= gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, skin);
+        gl.bufferData(gl.ARRAY_BUFFER, vertexBones(GRID, id, rigBody, aspect, headR), gl.STATIC_DRAW);
+      }
+      entry.bone = { key, id, skin };
+    }
+    return entry.bone.id;
+  }
+
+  function useBone(id, skin) {
+    if (id < 0 && skin) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, skin);
+      gl.enableVertexAttribArray(boneAttr);
+      gl.vertexAttribPointer(boneAttr, 1, gl.FLOAT, false, 0, 0);
+    } else {
+      gl.disableVertexAttribArray(boneAttr);
+      gl.vertexAttrib1f(boneAttr, id < 0 ? BONE.spine : id);
+    }
+  }
+
+  // 그림이 화면에 놓이는 위치 (캔버스 픽셀): x, y, 가로
   function placement() {
     const w = canvas.width;
     const h = canvas.height;
+    let s;
+    let x;
+    let y;
     if (opts.layout === 'bottom') {
-      const s = Math.min(w, h / aspect);
-      return [(w - s) / 2, h - s * aspect, s];
+      s = Math.min(w, h / aspect);
+      x = (w - s) / 2;
+      y = h - s * aspect;
+    } else {
+      s = Math.min(w, h / aspect) * (opts.layout === 'fill' ? 1 : 0.92);
+      x = (w - s) / 2;
+      y = (h - s * aspect) / 2;
     }
-    const s = Math.min(w, h / aspect) * 0.92;
-    return [(w - s) / 2, (h - s * aspect) / 2, s];
+    const k = canvas.width / (canvas.clientWidth || 1);
+    const z = view.zoom;
+    return [w / 2 + (x - w / 2) * z + view.x * k, h / 2 + (y - h / 2) * z + view.y * k, s * z];
   }
 
   function fitCanvas() {
@@ -254,16 +332,19 @@ export function createRenderer(canvas, opts = {}) {
   }
 
   return {
-    setLayers(list, resolve) {
+    // extra: 지금은 안 그리지만 미리 불러 둘 레이어 (베타 캐릭터 슬롯 전환용)
+    setLayers(list, resolve, extra = []) {
       layers = list;
-      const keep = new Set(list.map(keyOf));
+      const all = [...list, ...extra];
+      const keep = new Set(all.map(keyOf));
       for (const [key, entry] of textures) {
         if (!keep.has(key)) {
           if (entry.tex) gl.deleteTexture(entry.tex);
+          if (entry.bone.skin) gl.deleteBuffer(entry.bone.skin);
           textures.delete(key);
         }
       }
-      for (const l of list) load(l, resolve);
+      for (const l of all) load(l, resolve);
     },
     isLoaded(layer) {
       return !!textures.get(keyOf(layer))?.ready;
@@ -273,6 +354,14 @@ export function createRenderer(canvas, opts = {}) {
       const k = canvas.clientWidth / (canvas.width || 1);
       const [x, y, s] = placement();
       return [x * k, y * k, s * k, s * k * aspect];
+    },
+    // 몸 레이어가 붙은 뼈 번호 (리깅이 꺼졌거나 아직 못 읽었으면 null)
+    boneOf(layer) {
+      const t = textures.get(keyOf(layer));
+      return !rigBody || layer.part !== 'body' || !t || !t.ready ? null : boneFor(t);
+    },
+    setView(v) {
+      view = v;
     },
     render(f) {
       aspect = f.aspect || 1;
@@ -292,6 +381,21 @@ export function createRenderer(canvas, opts = {}) {
       gl.uniform2f(u.uSquash, ...(f.squash || [1, 1]));
       gl.uniform2f(u.uBreath, f.breath ? f.breath.bodyStretch : 0, f.breath ? f.breath.headBob * A : 0);
 
+      const body = f.body && f.body.enabled ? f.body : null;
+      rigBody = body;
+      headR = f.center.r;
+      gl.uniform1f(u.uRig, body ? 1 : 0);
+      if (body) {
+        const k = body.follow / 100;
+        gl.uniform2f(u.uWaist, body.joints.waist.x, body.joints.waist.y * A);
+        gl.uniform1f(u.uBodyR, Math.max(0.01, body.radius));
+        gl.uniform3f(u.uBodyAng, f.head.yaw * k * 1.4, f.head.pitch * k * 0.8, f.head.yaw * k * 0.4);
+        const rig = computeBones(body, A, { head: f.head, squash: f.squash, stretch: f.breath?.bodyStretch, arms: f.arms, pose: f.pose, poseLen: f.poseLen });
+        gl.uniform4fv(u.uBoneM, rig.bones.flatMap((m) => [m[0], m[1], m[2], m[3]]));
+        gl.uniform2fv(u.uBoneT, rig.bones.flatMap((m) => [m[4], m[5]]));
+        gl.uniform1fv(u.uBoneZ, rig.depth);
+      }
+
       const blink = f.blink ?? (f.eyesClosed ? 1 : 0);
       const eyes = f.eyes || { squash: false, y: 0.4, h: 0.05 };
       // 뒤(목록 아래)에서 앞으로 그린다
@@ -303,14 +407,17 @@ export function createRenderer(canvas, opts = {}) {
         const t = textures.get(keyOf(layer));
         if (!t || !t.ready || !isLayerShown(layer, f)) continue;
 
-        const hair = layer.hair.enabled && layer.part === 'head' && f.hair?.get(layer.id);
-        gl.uniform1f(u.uSeg, layer.part === 'head' ? 0 : 1);
+        const seg = layer.part === 'head' ? 0 : layer.part === 'fixed' ? 2 : 1;
+        if (body && seg === 1) useBone(boneFor(t), t.bone.skin);
+        else useBone(BONE.head, null);
+        const hair = layer.hair.enabled && f.hair?.get(layer.id);
+        gl.uniform1f(u.uSeg, seg);
         gl.uniform1f(u.uDepth, (layer.depth / 100) * 0.4);
         gl.uniform1f(u.uCurve, (layer.curve / 100) * 0.4);
         gl.uniform1f(u.uHairOn, hair ? 1 : 0);
         gl.uniform1f(u.uAnchorY, layer.hair.anchorY * A);
         gl.uniform1f(u.uHairDir, layer.hair.dir === 'up' ? -1 : 1);
-        gl.uniform1f(u.uHairEnd, layer.hair.dir === 'up' ? 0 : A);
+        gl.uniform1f(u.uHairEnd, layer.hair.dir === 'up' ? (f.hairToContent ? t.top : 0) * A : (f.hairToContent ? t.bottom : 1) * A);
         gl.uniform2f(u.uHairOffset, ...(hair ? hair.offset : [0, 0]));
         gl.uniform1f(u.uHairAngle, hair ? hair.angle : 0);
         const squeeze = eyes.squash && layer.show === 'eyesOpen' ? 1 - 0.75 * Math.min(1, blink / BLINK_CLOSED) : 1;
@@ -326,7 +433,19 @@ export function createRenderer(canvas, opts = {}) {
           gl.stencilFunc(gl.EQUAL, 1, 0xff);
           gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
         }
+        // 양팔·양다리 한 장 레이어: 앞뒤 순서를 깊이 버퍼로 가린다
+        const pairLayer = !!body && seg === 1 && t.bone.id < 0;
+        if (pairLayer) {
+          gl.clear(gl.DEPTH_BUFFER_BIT);
+          gl.enable(gl.DEPTH_TEST);
+          gl.depthFunc(gl.LESS);
+          gl.uniform1f(u.uAlphaTest, 0.02);
+        }
         gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
+        if (pairLayer) {
+          gl.disable(gl.DEPTH_TEST);
+          gl.uniform1f(u.uAlphaTest, 0);
+        }
         gl.disable(gl.STENCIL_TEST);
 
         if (isClipBase) {
@@ -343,8 +462,92 @@ export function createRenderer(canvas, opts = {}) {
       }
     },
     destroy() {
-      for (const e of textures.values()) if (e.tex) gl.deleteTexture(e.tex);
+      for (const e of textures.values()) {
+        if (e.tex) gl.deleteTexture(e.tex);
+        if (e.bone.skin) gl.deleteBuffer(e.bone.skin);
+      }
       textures.clear();
     }
   };
+}
+
+// 레이어 그림들의 세로/가로 비율 중 가장 많이 쓰인 것 (같으면 큰 그림 우선)
+export function aspectTracker() {
+  const sizes = new Map();
+  return {
+    add(layer, w, h, layers) {
+      sizes.set(layer.id, { w, h });
+      const groups = new Map();
+      for (const l of layers) {
+        const s = sizes.get(l.id);
+        if (!s) continue;
+        const r = Math.round((s.h / s.w) * 100) / 100;
+        const g = groups.get(r) || { count: 0, area: 0 };
+        g.count++;
+        g.area = Math.max(g.area, s.w * s.h);
+        groups.set(r, g);
+      }
+      let best = null;
+      let bestG = { count: 0, area: 0 };
+      for (const [r, g] of groups) {
+        if (g.count > bestG.count || (g.count === bestG.count && g.area > bestG.area)) {
+          best = r;
+          bestG = g;
+        }
+      }
+      return best;
+    }
+  };
+}
+
+// 터치 두 손가락 핀치 확대·이동 (view를 직접 바꾼다)
+export function pinchZoom(getRect, view) {
+  const pts = new Map();
+  let start = null;
+  const list = () => [...pts.values()];
+  const local = (p) => {
+    const r = getRect();
+    return { x: p.x - r.left - r.width / 2, y: p.y - r.top - r.height / 2 };
+  };
+  return {
+    down(e) {
+      if (e.pointerType !== 'touch') return false;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) {
+        const [a, b] = list();
+        start = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, c: local({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }), view: { ...view } };
+        return true;
+      }
+      return false;
+    },
+    move(e) {
+      if (!pts.has(e.pointerId)) return false;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (!start || pts.size < 2) return false;
+      const [a, b] = list();
+      const zoom = Math.max(0.2, Math.min(8, (start.view.zoom * Math.hypot(a.x - b.x, a.y - b.y)) / start.d));
+      const c = local({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      view.x = c.x - ((start.c.x - start.view.x) * zoom) / start.view.zoom;
+      view.y = c.y - ((start.c.y - start.view.y) * zoom) / start.view.zoom;
+      view.zoom = zoom;
+      return true;
+    },
+    up(e) {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) start = null;
+    },
+    get active() {
+      return !!start;
+    }
+  };
+}
+
+// 휠 확대: 커서 위치를 기준으로
+export function wheelZoom(e, rect, view) {
+  const zoom = Math.max(0.2, Math.min(8, view.zoom * Math.exp(-e.deltaY * 0.0015)));
+  const cx = e.clientX - rect.left - rect.width / 2;
+  const cy = e.clientY - rect.top - rect.height / 2;
+  view.x = cx - ((cx - view.x) * zoom) / view.zoom;
+  view.y = cy - ((cy - view.y) * zoom) / view.zoom;
+  view.zoom = zoom;
 }

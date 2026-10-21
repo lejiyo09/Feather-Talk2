@@ -9,7 +9,19 @@ services:
         name: Cache-Control
         value: no-cache
     routes:
-      # 원본과 같은 /live 주소도 쓸 수 있게
+      # 원본과 같은 주소로도 열리게
       - type: rewrite
         source: /live
         destination: /live.html
+      - type: rewrite
+        source: /beta
+        destination: /beta/index.html
+      - type: rewrite
+        source: /beta/live
+        destination: /beta/live.html
+      - type: rewrite
+        source: /multi
+        destination: /multi/index.html
+      - type: rewrite
+        source: /multi/live
+        destination: /multi/live.html
