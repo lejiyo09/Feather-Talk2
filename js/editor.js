@@ -12,16 +12,18 @@ const store = createStore(beta);
 const app = document.getElementById('app');
 
 // ───────── 상단 막대 ─────────
-const importInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true });
+// 휴대폰·메신저로 받은 파일은 형식 정보가 달라 .json 필터에 걸려 회색으로 막히는 일이 많아 필터를 두지 않는다
+const importInput = h('input', { type: 'file', hidden: true });
 importInput.addEventListener('change', async () => {
   const file = importInput.files?.[0];
   importInput.value = '';
   if (!file || !confirm('지금 설정을 백업 파일 내용으로 바꿀까요?')) return;
   try {
-    await store.importBackup(file);
+    const broken = await store.importBackup(file);
+    if (broken.length) alert(`불러왔지만 그림이 깨진 레이어가 있어요: ${broken.join(', ')}\n그 레이어는 이미지를 다시 넣어 주세요.`);
   } catch (err) {
     console.error(err);
-    alert('백업 파일을 읽지 못했어요.');
+    alert(`백업 파일을 읽지 못했어요.\n${err?.message || ''}`.trim());
   }
 });
 

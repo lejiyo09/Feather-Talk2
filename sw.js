@@ -1,6 +1,6 @@
 'use strict';
 // 네트워크 우선 + 오프라인 캐시. 온라인이면 항상 최신 배포본을 쓴다.
-const CACHE = 'ft-v2-clone-3';
+const CACHE = 'ft-v2-clone-4';
 const SHELL = [
   '/', '/index.html', '/live.html', '/beta/', '/beta/index.html', '/beta/live.html', '/multi/', '/multi/index.html', '/multi/live.html',
   '/style.css', '/manifest.webmanifest',

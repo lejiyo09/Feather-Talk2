@@ -180,7 +180,13 @@ export function createStore(beta) {
     st.persist('all');
   }
   st.reset = () => replace(defaultCharacter());
-  st.importBackup = async (file) => replace(await importBackup(await file.text()));
+  st.importBackup = async (file) => {
+    const m = await importBackup(await file.text());
+    const broken = m.brokenImages || [];
+    delete m.brokenImages;
+    replace(m);
+    return broken;
+  };
   st.exportBackup = async () => {
     const json = await exportBackup(st.model);
     const a = document.createElement('a');

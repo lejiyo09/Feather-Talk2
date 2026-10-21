@@ -369,15 +369,61 @@ export async function exportBackup(model) {
   return JSON.stringify(m);
 }
 
+// 불러오기 실패 이유를 화면에 알려 주기 위한 오류
+export class BackupError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.cause = cause;
+  }
+}
+
+// data URL → Blob. fetch(data:)는 브라우저·보안 설정에 따라 막힐 수 있어 직접 푼다
+function dataUrlToBlob(url) {
+  const comma = url.indexOf(',');
+  if (!url.startsWith('data:') || comma < 0) throw new Error('data URL이 아니에요');
+  const head = url.slice(5, comma);
+  const type = head.split(';')[0] || 'application/octet-stream';
+  const body = url.slice(comma + 1);
+  if (!/;base64/i.test(head)) return new Blob([decodeURIComponent(body)], { type });
+  const bin = atob(body.replace(/\s/g, ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
 export async function importBackup(text) {
-  const raw = JSON.parse(text);
-  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.layers)) throw new Error('not a backup');
+  let raw;
+  try {
+    raw = JSON.parse(text.replace(/^\uFEFF/, ''));
+  } catch (err) {
+    throw new BackupError('JSON 파일이 아니거나 내용이 잘렸어요. 내려받기가 끝까지 됐는지 확인해 주세요.', err);
+  }
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.layers)) {
+    throw new BackupError('Feather-Talk 백업 파일이 아니에요 (레이어 목록이 없어요).');
+  }
   const m = normalizeModel(raw);
+  const broken = [];
   for (const layer of m.layers) {
-    if (layer.src.type === 'data') {
-      const blob = await (await fetch(layer.src.value)).blob();
+    if (layer.src.type !== 'data') continue;
+    if (!layer.src.value) {
+      layer.src = { type: 'url', value: '' };
+      continue;
+    }
+    let blob;
+    try {
+      blob = dataUrlToBlob(layer.src.value);
+    } catch {
+      // 그림 하나가 깨졌어도 나머지는 살린다
+      broken.push(layer.name);
+      layer.src = { type: 'url', value: '' };
+      continue;
+    }
+    try {
       layer.src = { type: 'file', value: await putFile(blob) };
+    } catch (err) {
+      throw new BackupError('그림을 이 브라우저에 저장하지 못했어요. 저장 공간이 부족하거나 사생활 보호(시크릿) 모드일 수 있어요.', err);
     }
   }
+  m.brokenImages = broken;
   return m;
 }
